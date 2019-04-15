@@ -6,7 +6,6 @@ class fast_contacts extends rcube_addressbook
   private $directory_auth_token;
   private $labels;
   private $all_members_group_id = 1;
-  private $current_group_id;
 
   /**
    * Object constructor
@@ -70,7 +69,9 @@ class fast_contacts extends rcube_addressbook
    */
   function list_records($cols = null, $subset = 0)
   {
-    $this->result = $this->query_members($subset);
+    if (!$this->result) {
+      $this->result = $this->query_members(null, $subset);
+    }
 
     return $this->result;
   }
@@ -89,7 +90,23 @@ class fast_contacts extends rcube_addressbook
    */
   function search($fields, $value, $mode=0, $select=true, $nocount=false, $required=array())
   {
-    $this->list_records();
+    $query = [];
+
+    $mapping = ['firstname' => 'first_name', 'surname' => 'last_name'];
+    $all_fields = ['first_name', 'last_name', 'email'];
+
+    if (is_array($fields)) {
+      foreach ($fields as $field) {
+        $key = $mapping[$field] ?: $field;
+        $query[$key] = $value;
+      }
+    } else {
+      foreach ($all_fields as $field) {
+        $query[$field] = $value;
+      }
+    }
+
+    $this->result = $this->query_members(null, null, $query);
 
     return $this->result;
   }
@@ -101,7 +118,11 @@ class fast_contacts extends rcube_addressbook
    */
   function count()
   {
-    $count = isset($this->cache['count']) ? $this->cache['count'] : 0;
+    if (!isset($this->cache['count'])) {
+      $this->list_records();
+    }
+    $count = $this->cache['count'];
+
     return new rcube_result_set($count, ($this->list_page-1) * $this->page_size);
   }
 
@@ -136,15 +157,6 @@ class fast_contacts extends rcube_addressbook
   }
 
   /**
-   * Setter for the current group
-   */
-  function set_group($gid)
-  {
-    $this->current_group_id = $gid;
-    $this->cache    = null;
-  }
-
-  /**
    * List all active contact groups of this source
    *
    * @param string $search Optional search string to match group name
@@ -156,7 +168,8 @@ class fast_contacts extends rcube_addressbook
   {
     $result = array();
 
-    $name = $this->labels['all_members'];
+    $group = $this->get_group();
+    $name = $group['name'];
 
     if (
       !$search
@@ -166,13 +179,27 @@ class fast_contacts extends rcube_addressbook
          && !($mode & rcube_addressbook::SEARCH_PREFIX)
          && stripos($name, $search) !== false)) {
 
-      $result[] = array(
-        'ID' => $this->all_members_group_id,
-        'name' => $name
-      );
+      $result[] = $group;
     }
 
     return $result;
+  }
+
+  /**
+   * Get group properties such as name and email address(es)
+   *
+   * @param string $group_id Group identifier
+   *
+   * @return array Group properties as hash array
+   */
+  function get_group($group_id = null)
+  {
+    $name = $this->labels['all_members'];
+
+    return [
+      'ID' => $this->all_members_group_id,
+      'name' => $name
+    ];
   }
 
   /**
@@ -192,12 +219,17 @@ class fast_contacts extends rcube_addressbook
   /**
    * query API endpoint to get member data
    */
-  private function query_members($id = null, $subset = 0)
+  private function query_members($id = null, $subset = 0, $query = null)
   {
     $ch = curl_init();
 
+    if ($query) {
+      $params = '?' . http_build_query($query);
+    }
+    $url = $this->directory_url . ($id ? "/{$id}" : '') . $params;
+
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_URL, $this->directory_url . ($id ? "/{$id}" : ''));
+    curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
       'X-Authorization: ' . $this->directory_auth_token
     ]);
@@ -224,11 +256,16 @@ class fast_contacts extends rcube_addressbook
           'surname' => $member->last_name
         ]);
       }
+
+      $this->cache['count'] = $result->count;
+
+      return $result;
+
+    } else {
+      $this->set_error(self::ERROR_NO_CONNECTION, $error);
+
+      return false;
     }
-
-    $this->cache['count'] = $result->count;
-
-    return $result;
   }
 
   private function limit_result($members, $result, $subset) {

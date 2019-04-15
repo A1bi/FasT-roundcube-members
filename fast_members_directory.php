@@ -44,7 +44,8 @@ class fast_members_directory extends rcube_plugin
     $params['sources'][] = array(
       'id' => $this->book_id,
       'name' => $this->book_name,
-      'readonly' => true
+      'readonly' => true,
+      'groups' => true
     );
 
     return $params;
