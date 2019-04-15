@@ -1,4 +1,10 @@
 <?php
 
-/* limit this address book to certain accounts */
+// limit this address book to certain accounts
 $config['fast_members_accounts'] = array('foo@bar.org');
+
+// query the following endpoint to get member data
+$config['fast_members_directory_url'] = 'http://example.com/api/members';
+
+// use the following token to authenticate against endpoint
+$config['fast_members_directory_auth_token'] = '';

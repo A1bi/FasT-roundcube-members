@@ -2,6 +2,8 @@
 
 class fast_contacts extends rcube_addressbook
 {
+  private $directory_url;
+  private $directory_auth_token;
   private $labels;
   private $all_members_group_id = 1;
   private $current_group_id;
@@ -11,6 +13,9 @@ class fast_contacts extends rcube_addressbook
    */
   function __construct($labels)
   {
+    $config = rcmail::get_instance()->config;
+    $this->directory_url = $config->get('fast_members_directory_url', 'http://localhost');
+    $this->directory_auth_token = $config->get('fast_members_directory_auth_token', '');
     $this->labels = $labels;
     $this->ready = true;
     $this->groups = true;
@@ -60,24 +65,12 @@ class fast_contacts extends rcube_addressbook
    *
    * @param  array   List of cols to show, Null means all
    * @param  int     Only return this number of records, use negative values for tail
-   * @param  boolean True to skip the count query (select only)
    *
    * @return array Indexed list of contact records, each a hash array
    */
-  function list_records($cols=null, $subset=0)
+  function list_records($cols = null, $subset = 0)
   {
-    $this->result = new rcube_result_set();
-
-    $this->result->add(
-      array(
-        'ID' => 1,
-        'email' => 'foo@foo.de',
-        'firstname' => 'John',
-        'surname' => 'Doe'
-      )
-    );
-
-    $this->result->count = 1;
+    $this->result = $this->query_members($subset);
 
     return $this->result;
   }
@@ -108,7 +101,8 @@ class fast_contacts extends rcube_addressbook
    */
   function count()
   {
-    return new rcube_result_set(1, ($this->list_page-1) * $this->page_size);
+    $count = isset($this->cache['count']) ? $this->cache['count'] : 0;
+    return new rcube_result_set($count, ($this->list_page-1) * $this->page_size);
   }
 
   /**
@@ -129,22 +123,16 @@ class fast_contacts extends rcube_addressbook
    *
    * @return rcube_result_set|array Result object with all record fields
    */
-  function get_record($id, $assoc=false)
+  function get_record($id, $assoc = false)
   {
     // return cached result
     if ($this->result && ($first = $this->result->first()) && $first['ID'] == $id) {
       return $assoc ? $first : $this->result;
     }
 
-    $this->result = new rcube_result_set(1);
-    $this->result->add(array(
-      'ID' => 1,
-      'email' => 'foo@foo.de',
-      'firstname' => 'John',
-      'surname' => 'Doe'
-    ));
+    $this->result = $this->query_members($id);
 
-    return $this->result;
+    return $assoc ? $this->result->first() : $this->result;
   }
 
   /**
@@ -199,5 +187,54 @@ class fast_contacts extends rcube_addressbook
     $result = array();
     $result[$this->all_members_group_id] = $this->labels['all_members'];
     return $result;
+  }
+
+  /**
+   * query API endpoint to get member data
+   */
+  private function query_members($id = null, $subset = 0)
+  {
+    $ch = curl_init();
+
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_URL, $this->directory_url . ($id ? "/{$id}" : ''));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+      'X-Authorization: ' . $this->directory_auth_token
+    ]);
+
+    $content = curl_exec($ch);
+    $okay = !curl_errno($ch) && curl_getinfo($ch, CURLINFO_HTTP_CODE) == 200;
+    curl_close($ch);
+
+    $result = new rcube_result_set();
+
+    if ($okay) {
+      $members = json_decode($content);
+      $result->count = count($members);
+
+      if (!$id) {
+        $members = $this->limit_result($members, $result, $subset);
+      }
+
+      foreach ($members as $member) {
+        $result->add([
+          'ID' => $member->id,
+          'email' => $member->email,
+          'firstname' => $member->first_name,
+          'surname' => $member->last_name
+        ]);
+      }
+    }
+
+    $this->cache['count'] = $result->count;
+
+    return $result;
+  }
+
+  private function limit_result($members, $result, $subset) {
+    $start = ($this->list_page - ($subset < 0 ? 0 : 1)) * $this->page_size;
+    $length = $subset != 0 ? abs($subset) : $this->page_size;
+    $result->first = $start;
+    return array_slice($members, $start, $length);
   }
 }

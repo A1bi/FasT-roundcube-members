@@ -53,10 +53,12 @@ class fast_members_directory extends rcube_plugin
   function addressbook_get($params)
   {
     if ($params['id'] === $this->book_id) {
-      $params['instance'] = new fast_contacts(array(
+      $labels = [
         'name' => $this->book_name,
         'all_members' => $this->gettext('all_members')
-      ));
+      ];
+
+      $params['instance'] = new fast_contacts($labels);
     }
 
     return $params;
