@@ -1,0 +1,4 @@
+<?php
+
+/* limit this address book to certain accounts */
+$config['fast_members_accounts'] = array('foo@bar.org');

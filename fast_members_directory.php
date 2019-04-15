@@ -19,13 +19,21 @@ class fast_members_directory extends rcube_plugin
 
   function init()
   {
+    $this->load_config();
+
+    $rcmail = rcmail::get_instance();
+    $config = $rcmail->config;
+
+    if (!in_array($rcmail->user->get_username(), $config->get('fast_members_accounts', array()))) {
+      return;
+    }
+
     $this->add_texts('i18n/');
     $this->book_name = $this->gettext('book_name');
 
     $this->add_hook('addressbooks_list', array($this, 'addressbooks_list'));
     $this->add_hook('addressbook_get', array($this, 'addressbook_get'));
 
-    $config = rcmail::get_instance()->config;
     $sources = (array) $config->get('autocomplete_addressbooks', array('sql'));
     $sources[] = $this->book_id;
     $config->set('autocomplete_addressbooks', $sources);
