@@ -6,6 +6,9 @@ class fast_contacts extends rcube_addressbook
   private $all_members_group_id = 1;
   private $current_group_id;
 
+  /**
+   * Object constructor
+   */
   function __construct($labels)
   {
     $this->labels = $labels;
@@ -13,22 +16,38 @@ class fast_contacts extends rcube_addressbook
     $this->groups = true;
   }
 
+  /**
+   * Returns addressbook name (e.g. for addressbooks listing)
+   */
   function get_name()
   {
     return $this->labels['name'];
   }
 
+  /**
+   * Save a search string for future listings
+   *
+   * @param mixed $filter Search params to use in listing method, obtained by get_search_set()
+   */
   function set_search_set($filter)
   {
     $this->filter = $filter;
     $this->cache = null;
   }
 
+  /**
+   * Getter for saved search properties
+   *
+   * @return mixed Search properties used by this class
+   */
   function get_search_set()
   {
     return $this->filter;
   }
 
+  /**
+   * Reset all saved results and search parameters
+   */
   function reset()
   {
     $this->result = null;
@@ -36,6 +55,15 @@ class fast_contacts extends rcube_addressbook
     $this->cache  = null;
   }
 
+  /**
+   * List the current set of contact records
+   *
+   * @param  array   List of cols to show, Null means all
+   * @param  int     Only return this number of records, use negative values for tail
+   * @param  boolean True to skip the count query (select only)
+   *
+   * @return array Indexed list of contact records, each a hash array
+   */
   function list_records($cols=null, $subset=0)
   {
     $this->result = new rcube_result_set();
@@ -54,6 +82,18 @@ class fast_contacts extends rcube_addressbook
     return $this->result;
   }
 
+  /**
+   * Search contacts
+   *
+   * @param mixed   $fields   The field name or array of field names to search in
+   * @param mixed   $value    Search value (or array of values when $fields is array)
+   * @param int     $mode     Search mode. Sum of rcube_addressbook::SEARCH_*
+   * @param boolean $select   True if results are requested, False if count only
+   * @param boolean $nocount  True to skip the count query (select only)
+   * @param array   $required List of fields that cannot be empty
+   *
+   * @return object rcube_result_set Contact records and 'count' value
+   */
   function search($fields, $value, $mode=0, $select=true, $nocount=false, $required=array())
   {
     $this->list_records();
@@ -61,11 +101,21 @@ class fast_contacts extends rcube_addressbook
     return $this->result;
   }
 
+  /**
+   * Count number of available contacts in database
+   *
+   * @return rcube_result_set Result object
+   */
   function count()
   {
     return new rcube_result_set(1, ($this->list_page-1) * $this->page_size);
   }
 
+  /**
+   * Return the last result set
+   *
+   * @return mixed Result array or NULL if nothing selected yet
+   */
   function get_result()
   {
     return $this->result;
