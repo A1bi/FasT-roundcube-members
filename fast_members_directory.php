@@ -34,17 +34,17 @@ class fast_members_directory extends rcube_plugin
     $this->add_hook('addressbooks_list', array($this, 'addressbooks_list'));
     $this->add_hook('addressbook_get', array($this, 'addressbook_get'));
 
-    $sources = (array) $config->get('autocomplete_addressbooks', array('sql'));
-    $sources[] = $this->book_id;
+    // disable default sql address book and add this to autocomplete
+    $config->set('address_book_type', '');
+    $sources = [$this->book_id];
     $config->set('autocomplete_addressbooks', $sources);
   }
 
   function addressbooks_list($params)
   {
-    $params['sources'][] = array(
+    $params['sources'][$this->book_id] = array(
       'id' => $this->book_id,
       'name' => $this->book_name,
-      'readonly' => true,
       'groups' => true
     );
 
@@ -53,7 +53,7 @@ class fast_members_directory extends rcube_plugin
 
   function addressbook_get($params)
   {
-    if ($params['id'] === $this->book_id) {
+    if ($params['id'] == $this->book_id) {
       $labels = [
         'name' => $this->book_name,
         'all_members' => $this->gettext('all_members')

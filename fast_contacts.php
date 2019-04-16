@@ -1,62 +1,38 @@
 <?php
 
-class fast_contacts extends rcube_addressbook
+class fast_contacts extends rcube_contacts
 {
   private $directory_url;
   private $directory_auth_token;
   private $labels;
-  private $all_members_group_id = 1;
+  private $result;
+  private $all_members;
+  private $all_members_group_id = 'all_members';
+  private $fast_id_prefix = 'fast_';
 
   /**
    * Object constructor
    */
   function __construct($labels)
   {
-    $config = rcmail::get_instance()->config;
+    $rcmail = rcmail::get_instance();
+    $config = $rcmail->config;
+
     $this->directory_url = $config->get('fast_members_directory_url', 'http://localhost');
     $this->directory_auth_token = $config->get('fast_members_directory_auth_token', '');
     $this->labels = $labels;
-    $this->ready = true;
-    $this->groups = true;
+
+    parent::__construct($rcmail->db, $rcmail->user->ID);
   }
 
   /**
-   * Returns addressbook name (e.g. for addressbooks listing)
-   */
-  function get_name()
-  {
-    return $this->labels['name'];
-  }
-
-  /**
-   * Save a search string for future listings
+   * Return the last result set
    *
-   * @param mixed $filter Search params to use in listing method, obtained by get_search_set()
+   * @return mixed Result array or NULL if nothing selected yet
    */
-  function set_search_set($filter)
+  function get_result()
   {
-    $this->filter = $filter;
-    $this->cache = null;
-  }
-
-  /**
-   * Getter for saved search properties
-   *
-   * @return mixed Search properties used by this class
-   */
-  function get_search_set()
-  {
-    return $this->filter;
-  }
-
-  /**
-   * Reset all saved results and search parameters
-   */
-  function reset()
-  {
-    $this->result = null;
-    $this->filter = null;
-    $this->cache  = null;
+    return $this->result;
   }
 
   /**
@@ -67,11 +43,48 @@ class fast_contacts extends rcube_addressbook
    *
    * @return array Indexed list of contact records, each a hash array
    */
-  function list_records($cols = null, $subset = 0)
+  function list_records($cols = null, $subset = 0, $nocount = false)
   {
-    if (!$this->result) {
-      $this->result = $this->query_members(null, $subset);
+    if ($nocount) {
+      return parent::list_records($cols, $subset, $nocount);
     }
+
+    if ($this->result) {
+      return $this->result;
+    }
+
+    $result = parent::list_records($cols, $subset);
+    $this->result = $result;
+
+    $members = $this->query_members();
+
+    if ($this->group_id && $this->group_id !== $this->all_members_group_id) {
+      $db = rcmail::get_instance()->db;
+
+      $sql_result = $db->query(
+        "SELECT contact_id FROM {$db->table_name($this->db_groupmembers, true)}
+         WHERE contactgroup_id = ?
+         AND contact_id LIKE '{$this->fast_id_prefix}%'",
+        $this->group_id);
+
+      $contacts = [];
+      while ($sql_result && ($sql_arr = $db->fetch_assoc($sql_result))) {
+        $contacts[] = $sql_arr['contact_id'];
+      }
+
+      $_members = $members;
+      $members = [];
+      foreach ($_members as $member) {
+        if (in_array($member['ID'], $contacts)) {
+          $members[] = $member;
+        }
+      }
+    }
+
+    foreach ($members as $member) {
+      $this->result->add($member);
+    }
+    $this->limit_result($subset);
 
     return $this->result;
   }
@@ -90,6 +103,8 @@ class fast_contacts extends rcube_addressbook
    */
   function search($fields, $value, $mode=0, $select=true, $nocount=false, $required=array())
   {
+    $this->result = parent::search($fields, $value, $mode, $select, $nocount, $required);
+
     $query = [];
 
     $mapping = ['firstname' => 'first_name', 'surname' => 'last_name'];
@@ -106,33 +121,12 @@ class fast_contacts extends rcube_addressbook
       }
     }
 
-    $this->result = $this->query_members(null, null, $query);
-
-    return $this->result;
-  }
-
-  /**
-   * Count number of available contacts in database
-   *
-   * @return rcube_result_set Result object
-   */
-  function count()
-  {
-    if (!isset($this->cache['count'])) {
-      $this->list_records();
+    $members = $this->query_members(null, $query);
+    foreach ($members as $member) {
+      $this->result->add($member);
     }
-    $count = $this->cache['count'];
+    $this->limit_result($subset);
 
-    return new rcube_result_set($count, ($this->list_page-1) * $this->page_size);
-  }
-
-  /**
-   * Return the last result set
-   *
-   * @return mixed Result array or NULL if nothing selected yet
-   */
-  function get_result()
-  {
     return $this->result;
   }
 
@@ -146,14 +140,18 @@ class fast_contacts extends rcube_addressbook
    */
   function get_record($id, $assoc = false)
   {
-    // return cached result
-    if ($this->result && ($first = $this->result->first()) && $first['ID'] == $id) {
-      return $assoc ? $first : $this->result;
+    if ($this->id_belongs_to_fast($id)) {
+      $id = $this->trim_fast_id($id);
+      $this->result = new rcube_result_set(1);
+      $this->result->add($this->query_members($id)[0]);
+
+      return $assoc ? $this->result->first() : $this->result;
+
+    } else {
+      $record = parent::get_record($id, $assoc);
+      $this->result = parent::get_result();
+      return $record;
     }
-
-    $this->result = $this->query_members($id);
-
-    return $assoc ? $this->result->first() : $this->result;
   }
 
   /**
@@ -166,7 +164,7 @@ class fast_contacts extends rcube_addressbook
    */
   function list_groups($search = null, $mode = 0)
   {
-    $result = array();
+    $result = parent::list_groups($search, $mode);
 
     $group = $this->get_group();
     $name = $group['name'];
@@ -211,16 +209,65 @@ class fast_contacts extends rcube_addressbook
    */
   function get_record_groups($id)
   {
-    $result = array();
-    $result[$this->all_members_group_id] = $this->labels['all_members'];
+    $result = parent::get_record_groups($id);
+
+    if ($this->id_belongs_to_fast($id)) {
+      $result[$this->all_members_group_id] = $this->labels['all_members'];
+    }
+
     return $result;
+  }
+
+  /**
+   * Remove the given contact records from a certain group
+   *
+   * @param string       $group_id Group identifier
+   * @param array|string $ids      List of contact identifiers to be removed
+   *
+   * @return int Number of deleted group members
+   */
+  function remove_from_group($group_id, $ids)
+  {
+    $db = rcmail::get_instance()->db;
+
+    if (!is_array($ids)) {
+      $ids = explode(self::SEPARATOR, $ids);
+    }
+
+    $ids = $db->array2list($ids);
+
+    $sql_result = $db->query(
+      "DELETE FROM " . $db->table_name($this->db_groupmembers, true).
+      " WHERE `contactgroup_id` = ?".
+      " AND `contact_id` IN ($ids)",
+      $group_id
+    );
+
+    return $db->affected_rows($sql_result);
+  }
+
+  /**
+   * Count number of available contacts in database
+   *
+   * @return rcube_result_set Result object
+   */
+  function count()
+  {
+    $this->result = null;
+    $this->list_records();
+
+    return new rcube_result_set($this->result->count, ($this->list_page-1) * $this->page_size);
   }
 
   /**
    * query API endpoint to get member data
    */
-  private function query_members($id = null, $subset = 0, $query = null)
+  private function query_members($id = null, $query = null)
   {
+    if (!$id && !$query && $this->all_members) {
+      return $this->all_members;
+    }
+
     $ch = curl_init();
 
     if ($query) {
@@ -238,26 +285,24 @@ class fast_contacts extends rcube_addressbook
     $okay = !curl_errno($ch) && curl_getinfo($ch, CURLINFO_HTTP_CODE) == 200;
     curl_close($ch);
 
-    $result = new rcube_result_set();
+    $result = [];
 
     if ($okay) {
       $members = json_decode($content);
-      $result->count = count($members);
-
-      if (!$id) {
-        $members = $this->limit_result($members, $result, $subset);
-      }
 
       foreach ($members as $member) {
-        $result->add([
-          'ID' => $member->id,
+        $result[] = [
+          'ID' => 'fast_' . $member->id,
           'email' => $member->email,
           'firstname' => $member->first_name,
-          'surname' => $member->last_name
-        ]);
+          'surname' => $member->last_name,
+          'readonly' => true
+        ];
       }
 
-      $this->cache['count'] = $result->count;
+      if (!$id && !$query) {
+        $this->all_members = $result;
+      }
 
       return $result;
 
@@ -268,10 +313,20 @@ class fast_contacts extends rcube_addressbook
     }
   }
 
-  private function limit_result($members, $result, $subset) {
+  private function limit_result($subset = 0) {
     $start = ($this->list_page - ($subset < 0 ? 0 : 1)) * $this->page_size;
     $length = $subset != 0 ? abs($subset) : $this->page_size;
     $result->first = $start;
-    return array_slice($members, $start, $length);
+    $records = $this->result->records;
+    $this->result->records = array_slice($records, $start, $length);
+    $this->result->count = count($records);
+  }
+
+  private function id_belongs_to_fast($id) {
+    return strpos($id, $this->fast_id_prefix) === 0;
+  }
+
+  private function trim_fast_id($id) {
+    return str_replace($this->fast_id_prefix, '', $id);
   }
 }

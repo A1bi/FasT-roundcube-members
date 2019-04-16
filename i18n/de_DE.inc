@@ -1,7 +1,7 @@
 <?php
 
 $labels = array();
-$labels['book_name'] = 'Vereinsmitglieder';
-$labels['all_members'] = 'Alle Mitglieder';
+$labels['book_name'] = 'Adressbuch';
+$labels['all_members'] = 'Vereinsmitglieder';
 
 $messages = array();
