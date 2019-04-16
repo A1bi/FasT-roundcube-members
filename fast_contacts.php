@@ -207,6 +207,25 @@ class fast_contacts extends rcube_contacts
   }
 
   /**
+   * Add the given contact records the a certain group
+   *
+   * @param string       Group identifier
+   * @param array|string List of contact identifiers to be added
+   *
+   * @return int Number of contacts added
+   */
+  function add_to_group($group_id, $ids)
+  {
+    if ($group_id === $this->all_members_group_id) {
+      $this->set_error(self::ERROR_VALIDATE, '');
+
+      return false;
+    }
+
+    return parent::add_to_group($group_id, $ids);
+  }
+
+  /**
    * Remove the given contact records from a certain group
    *
    * @param string       $group_id Group identifier
@@ -216,6 +235,12 @@ class fast_contacts extends rcube_contacts
    */
   function remove_from_group($group_id, $ids)
   {
+    if ($group_id === $this->all_members_group_id) {
+      $this->set_error(self::ERROR_VALIDATE, '');
+
+      return false;
+    }
+
     $db = rcmail::get_instance()->db;
 
     if (!is_array($ids)) {
