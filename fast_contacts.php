@@ -98,7 +98,7 @@ class fast_contacts extends rcube_contacts
     $mapping = ['firstname' => 'first_name', 'surname' => 'last_name'];
     $all_fields = ['first_name', 'last_name', 'email'];
 
-    if (is_array($fields)) {
+    if (is_array($fields) && !in_array('words', $fields)) {
       foreach ($fields as $field) {
         $key = $mapping[$field] ?: $field;
         $query[$key] = $value;
