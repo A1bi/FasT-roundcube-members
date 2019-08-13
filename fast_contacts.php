@@ -8,7 +8,10 @@ class fast_contacts extends rcube_contacts
   private $result;
   private $all_members;
   private $all_members_group_id = 'all_members';
+  private $found_members;
   private $fast_id_prefix = 'fast_';
+  private $db;
+  private $rdc_contacts;
 
   /**
    * Object constructor
@@ -22,7 +25,52 @@ class fast_contacts extends rcube_contacts
     $this->directory_auth_token = $config->get('fast_members_directory_auth_token', '');
     $this->labels = $labels;
 
-    parent::__construct($rcmail->db, $rcmail->user->ID);
+    $this->db = $rcmail->db;
+    $this->rdc_contacts = new rcube_contacts($this->db, $rcmail->user->ID);
+
+    parent::__construct($this->db, $rcmail->user->ID);
+  }
+
+  /**
+   * Setter for the current group
+   * (empty, has to be re-implemented by extending class)
+   */
+  function set_group($gid)
+  {
+    $this->group_id = $gid;
+    $this->rdc_contacts->set_group($gid);
+  }
+
+  /**
+   * Reset all saved results and search parameters
+   */
+  function reset()
+  {
+    $this->result = null;
+    $this->found_members = null;
+    $this->rdc_contacts->reset();
+  }
+
+  /**
+   * Set internal page size
+   *
+   * @param number $size Number of messages to display on one page
+   */
+  function set_pagesize($size)
+  {
+    parent::set_pagesize($size);
+    $this->rdc_contacts->set_pagesize($size);
+  }
+
+  /**
+   * Set internal list page
+   *
+   * @param number $page Page number to list
+   */
+  function set_page($page)
+  {
+    $this->list_page = $page;
+    $this->rdc_contacts->set_page($page);
   }
 
   /**
@@ -43,36 +91,39 @@ class fast_contacts extends rcube_contacts
    *
    * @return array Indexed list of contact records, each a hash array
    */
-  function list_records($cols = null, $subset = 0, $nocount = false)
+  function list_records($cols = null, $subset = 0)
   {
-    if ($nocount) {
-      return parent::list_records($cols, $subset, $nocount);
+    $start = ($this->list_page - ($subset < 0 ? 0 : 1)) * $this->page_size;
+    $length = $subset != 0 ? abs($subset) : $this->page_size;
+    $rdc_count = $this->rdc_contacts->count();
+    if ($rdc_count->count > $start) {
+      $this->result = $this->rdc_contacts->list_records($cols, $subset);
+    } else {
+      $this->result = $rdc_count;
     }
 
-    if ($this->result) {
-      return $this->result;
+    $start = max(0, $start - $rdc_count->count);
+    $length -= count($this->result->records);
+
+    $members = $this->found_members;
+    if (!isset($members)) {
+      $members = $this->query_members();
     }
-
-    $this->result = parent::list_records($cols, $subset, $nocount);
-
-    $this->query_members();
 
     if ($this->group_id && $this->group_id !== $this->all_members_group_id) {
       $ids = $this->get_all_contact_ids_for_group();
 
-      foreach ($this->all_members as $member) {
-        if (in_array($member['ID'], $ids)) {
-          $this->result->add($member);
-        }
-      }
-
-    } else {
-      foreach ($this->all_members as $member) {
-        $this->result->add($member);
-      }
+      $members = array_filter($members, function($member) use(&$ids) {
+        return in_array($member['ID'], $ids);
+      });
     }
 
-    $this->limit_result($subset);
+    $this->result->count += count($members);
+
+    $members = array_slice($members, $start, $length);
+    foreach ($members as $member) {
+      $this->result->add($member);
+    }
 
     return $this->result;
   }
@@ -91,7 +142,7 @@ class fast_contacts extends rcube_contacts
    */
   function search($fields, $value, $mode=0, $select=true, $nocount=false, $required=array())
   {
-    $this->result = parent::search($fields, $value, $mode, $select, $nocount, $required);
+    $this->result = $this->rdc_contacts->search($fields, $value, $mode, $select, $nocount, $required);
 
     $query = [];
 
@@ -109,11 +160,11 @@ class fast_contacts extends rcube_contacts
       }
     }
 
-    $members = $this->query_members(null, $query);
-    foreach ($members as $member) {
-      $this->result->add($member);
+    $this->found_members = $this->query_members(null, $query);
+    foreach ($this->found_members as $member) {
+      if ($select) $this->result->add($member);
+      $this->result->count++;
     }
-    $this->limit_result($subset);
 
     return $this->result;
   }
@@ -154,7 +205,7 @@ class fast_contacts extends rcube_contacts
   {
     $result = parent::list_groups($search, $mode);
 
-    $group = $this->get_group();
+    $group = $this->get_group($this->all_members_group_id);
     $name = $group['name'];
 
     if (
@@ -178,14 +229,16 @@ class fast_contacts extends rcube_contacts
    *
    * @return array Group properties as hash array
    */
-  function get_group($group_id = null)
+  function get_group($group_id)
   {
-    $name = $this->labels['all_members'];
+    if ($group_id == $this->all_members_group_id) {
+      return [
+        'ID' => $this->all_members_group_id,
+        'name' => $this->labels['all_members']
+      ];
+    }
 
-    return [
-      'ID' => $this->all_members_group_id,
-      'name' => $name
-    ];
+    return parent::get_group($group_id);
   }
 
   /**
@@ -241,22 +294,20 @@ class fast_contacts extends rcube_contacts
       return false;
     }
 
-    $db = rcmail::get_instance()->db;
-
     if (!is_array($ids)) {
       $ids = explode(self::SEPARATOR, $ids);
     }
 
-    $ids = $db->array2list($ids);
+    $ids = $this->db->array2list($ids);
 
-    $sql_result = $db->query(
-      "DELETE FROM " . $db->table_name($this->db_groupmembers, true).
+    $sql_result = $this->db->query(
+      "DELETE FROM " . $this->get_group_members_table() .
       " WHERE `contactgroup_id` = ?".
       " AND `contact_id` IN ($ids)",
       $group_id
     );
 
-    return $db->affected_rows($sql_result);
+    return $this->db->affected_rows($sql_result);
   }
 
   /**
@@ -266,7 +317,7 @@ class fast_contacts extends rcube_contacts
    */
   function count()
   {
-    $count = parent::count()->count;
+    $count = $this->rdc_contacts->count();
 
     $this->query_members();
 
@@ -275,15 +326,15 @@ class fast_contacts extends rcube_contacts
 
       foreach ($this->all_members as $member) {
         if (in_array($member['ID'], $ids)) {
-          $count++;
+          $count->count++;
         }
       }
 
     } else {
-      $count += count($this->all_members);
+      $count->count += count($this->all_members);
     }
 
-    return new rcube_result_set($count, ($this->list_page-1) * $this->page_size);
+    return $count;
   }
 
   /**
@@ -341,29 +392,18 @@ class fast_contacts extends rcube_contacts
   }
 
   private function get_all_contact_ids_for_group() {
-    $db = rcmail::get_instance()->db;
-
-    $sql_result = $db->query(
-      "SELECT contact_id FROM {$db->table_name($this->db_groupmembers, true)}
+    $sql_result = $this->db->query(
+      "SELECT contact_id FROM {$this->get_group_members_table()}
        WHERE contactgroup_id = ?
        AND contact_id LIKE '{$this->fast_id_prefix}%'",
       $this->group_id);
 
     $ids = [];
-    while ($sql_result && ($sql_arr = $db->fetch_assoc($sql_result))) {
+    while ($sql_result && ($sql_arr = $this->db->fetch_assoc($sql_result))) {
       $ids[] = $sql_arr['contact_id'];
     }
 
     return $ids;
-  }
-
-  private function limit_result($subset = 0) {
-    $start = ($this->list_page - ($subset < 0 ? 0 : 1)) * $this->page_size;
-    $length = $subset != 0 ? abs($subset) : $this->page_size;
-    $result->first = $start;
-    $records = $this->result->records;
-    $this->result->records = array_slice($records, $start, $length);
-    $this->result->count = count($records);
   }
 
   private function id_belongs_to_fast($id) {
@@ -372,5 +412,9 @@ class fast_contacts extends rcube_contacts
 
   private function trim_fast_id($id) {
     return str_replace($this->fast_id_prefix, '', $id);
+  }
+
+  private function get_group_members_table() {
+    return $this->db->table_name('contactgroupmembers', true);
   }
 }
