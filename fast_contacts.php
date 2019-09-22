@@ -91,7 +91,7 @@ class fast_contacts extends rcube_contacts
    *
    * @return array Indexed list of contact records, each a hash array
    */
-  function list_records($cols = null, $subset = 0)
+  function list_records($cols = null, $subset = 0, $nocount = false)
   {
     $start = ($this->list_page - ($subset < 0 ? 0 : 1)) * $this->page_size;
     $length = $subset != 0 ? abs($subset) : $this->page_size;
