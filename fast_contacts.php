@@ -372,8 +372,16 @@ class fast_contacts extends rcube_contacts
         $result[] = [
           'ID' => 'fast_' . $member->id,
           'email' => $member->email,
+          'prefix' => $member->title,
           'firstname' => $member->first_name,
           'surname' => $member->last_name,
+          'address:home' => !$member->city ? null : [array(
+            'street' => $member->street,
+            'zipcode' => $member->plz,
+            'locality' => $member->city
+          )],
+          'phone:home' => $member->phone ? [$member->phone] : null,
+          'birthday' => $member->birthday,
           'readonly' => true
         ];
       }
