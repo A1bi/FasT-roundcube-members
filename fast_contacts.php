@@ -356,7 +356,7 @@ class fast_contacts extends rcube_contacts
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
-      'X-Authorization: ' . $this->directory_auth_token
+      'Authorization: Token ' . $this->directory_auth_token
     ]);
 
     $content = curl_exec($ch);
